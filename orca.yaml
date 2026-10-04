@@ -1,0 +1,5 @@
+# Orca workspace hooks (see scripts/init.sh).
+scripts:
+  # Every new worktree gets a ready .env (tokens from gh/glab, settings from the main checkout).
+  setup: |
+    "$ORCA_WORKTREE_PATH/scripts/init.sh"

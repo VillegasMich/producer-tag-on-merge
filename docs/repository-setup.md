@@ -57,9 +57,10 @@ release tag with *publish* (what the release workflow does). Tag `v1.2.3` become
 The job fails with a clear error if the secret or variable is missing when it needs them. Only
 the publish path logs in, and secrets are never exposed to pull requests from forks.
 
-The published image is the same one `scripts/install.sh` builds locally; to use it, replace
-`producer-tag-on-merge` with `<docker-hub-user>/producer-tag-on-merge:<version>` in the
-`docker run` command of [deployment.md](deployment.md#running-the-container-by-hand).
+The published image is the same one `scripts/install.sh` builds locally. To run it as the
+service, set `IMAGE=<docker-hub-user>/producer-tag-on-merge:<version>` in the env file and re-run
+the installer ([deployment.md](deployment.md#upgrading)); by hand, use it in place of
+`producer-tag-on-merge` in the [`docker run` command](deployment.md#running-the-container-by-hand).
 
 ## Live API tests (optional)
 

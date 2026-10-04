@@ -111,6 +111,7 @@ required.
 | `TIMEZONE`              | `UTC`                    | IANA zone for `QUIET_HOURS`, e.g. `America/Bogota`.      |
 | `DATA_DIR`              | platform dependent       | State file location (`/data` in Docker).                 |
 | `RUST_LOG`              | `info`                   | Log level.                                               |
+| `IMAGE`                 | `producer-tag-on-merge:latest` | Linux docker mode: image to run, e.g. `<user>/producer-tag-on-merge:1.2.3` (published release). |
 
 Full details: [`docs/configuration.md`](docs/configuration.md).
 
@@ -127,12 +128,18 @@ Full details: [`docs/configuration.md`](docs/configuration.md).
 ## Development
 
 ```bash
+scripts/init.sh                # write ./.env: gh/glab tokens, main checkout's settings, local tz
 cargo build
 cargo test
 cargo clippy --all-targets -- -D warnings
 cargo fmt
 cargo run -- simulate          # hear your tag through the full pipeline, no token needed
 ```
+
+`scripts/init.sh` is safe to re-run (keeps what `.env` already has, fills in what is empty) and
+points `DATA_DIR`/`TAGS_DIR` at `./.dev`, so dev runs never touch the installed service's state.
+[Orca](orca.yaml) runs it for every new worktree. `cargo dev [command]` is
+`cargo run -- --env-file .env [command]`.
 
 ## Status
 

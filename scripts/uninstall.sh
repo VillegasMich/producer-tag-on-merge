@@ -37,6 +37,8 @@ fi
 echo "==> Service removed"
 
 if [[ $purge == true ]]; then
+  # A published image configured with IMAGE in the env file is removed too.
+  image=$(sed -n 's/^IMAGE=//p' "$HOME/.config/$APP/env" 2>/dev/null | tail -n 1 || true)
   targets=("$HOME/.config/$APP" "$data_dir" "$HOME/.local/bin/$APP" ${extra[@]+"${extra[@]}"})
   if [[ -t 0 ]]; then
     printf 'This deletes your tokens, tags and state:\n'
@@ -46,7 +48,7 @@ if [[ $purge == true ]]; then
   fi
   rm -rf "${targets[@]}"
   if command -v docker >/dev/null 2>&1; then
-    docker image rm "$APP:latest" >/dev/null 2>&1 || true
+    docker image rm "$APP:latest" ${image:+"$image"} >/dev/null 2>&1 || true
   fi
   echo "==> Purged env file, tags, state, binary and Docker image"
 fi

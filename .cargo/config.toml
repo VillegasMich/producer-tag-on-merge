@@ -1,0 +1,4 @@
+[alias]
+# Run the CLI with this checkout's ./.env (written by scripts/init.sh):
+#   cargo dev             daemon       cargo dev check / once --dry-run / simulate
+dev = "run -- --env-file .env"
