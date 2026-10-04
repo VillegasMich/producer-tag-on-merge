@@ -24,6 +24,7 @@ behavior; update it in the same change when behavior changes. Sibling projects w
 ## Commands
 
 ```bash
+scripts/init.sh                # write ./.env (gh/glab tokens, main checkout settings); Orca runs it
 cargo build                    # build
 cargo test                     # unit tests (no network, no real audio)
 cargo clippy --all-targets -- -D warnings   # lint (must pass)
@@ -31,6 +32,7 @@ cargo fmt                      # format (must be clean)
 docker build -t producer-tag-on-merge .
 cargo run -- simulate          # fake merge through the real pipeline; plays your tag, no token
 cargo run -- --env-file .env check          # config, tokens, tags, audio
+cargo dev [command]            # alias: cargo run -- --env-file .env [command]
 cargo run -- --env-file .env once --dry-run # real API calls, plays nothing, state untouched
 scripts/install.sh [docker|native]          # install as user service (no sudo)
 ```
