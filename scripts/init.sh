@@ -82,7 +82,7 @@ env_get() {
 
 # KEY from ./.env (unless --force), else from the --from checkout's .env.
 lookup() {
-  found= origin=
+  found='' origin=''
   if ! $force; then
     found=$(env_get "$1" "$ENV_FILE")
     origin=kept
@@ -121,7 +121,7 @@ system_timezone() {
 }
 
 detect() {
-  found= origin=
+  found='' origin=''
   local host
   case $1 in
     GITHUB_TOKEN)
