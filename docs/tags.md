@@ -65,6 +65,9 @@ producer-tag-on-merge tag set ./tag.wav         # becomes TAGS_DIR/default.wav a
 producer-tag-on-merge play                      # play it again any time
 ```
 
+No tag yet? [`assets/sample-tag.wav`](../assets/sample-tag.wav) is a short synthesized stab (no
+third-party audio) that `scripts/install.sh` installs when you don't pick a file.
+
 With the Docker setup, `TAGS_DIR` is a host folder mounted into the container
 (`~/.config/producer-tag-on-merge/tags` by default), so you can also just copy the file there as
 `default.wav`. Changes are picked up on the next merge; no restart needed.

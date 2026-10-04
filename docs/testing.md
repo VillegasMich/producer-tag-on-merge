@@ -35,6 +35,10 @@ What must be covered:
   substitution without a shell.
 - **Shutdown:** signal during sleep exits within 1 s; signal during play waits for the player.
 
+`tests/cli.rs` runs the built binary offline (`PLAYER=none`, temp dirs): `tag set`/`tag list`,
+`simulate` with the burst cap and team tags, `--env-file` precedence, path traversal in `--for`,
+config errors that must not print tokens.
+
 ## `simulate`
 
 Runs the real poller, filters, tag lookup and player with a fake source. No token, no network.
@@ -82,5 +86,7 @@ cargo clippy --all-targets -- -D warnings
 cargo fmt --check
 ```
 
-CI (planned, GitHub Actions): fmt, clippy, tests on `ubuntu-latest` and `macos-latest`, Docker
-build on Linux.
+CI (GitHub Actions, [`ci.yml`](../.github/workflows/ci.yml)): fmt, clippy, tests on
+`ubuntu-latest` and `macos-latest`, `shellcheck`, Docker build + `simulate --silent` smoke test,
+and the live API tests on `main` when their secrets are set. Setup:
+[repository-setup.md](repository-setup.md).

@@ -35,33 +35,38 @@ Same layout on both platforms, so docs and scripts don't fork:
 Store them only in the env file (mode `600`). Don't bake them into the image and don't pass them
 with `-e TOKEN=…` on the command line (shell history, `ps`).
 
-## Install script (planned)
+## Install script
 
 ```bash
 scripts/install.sh            # docker on Linux, native on macOS
 scripts/install.sh native     # force a mode
 scripts/install.sh docker
-scripts/install.sh --reconfigure   # rewrite the env file
+scripts/install.sh --reconfigure   # rewrite the env file (tokens, settings)
+scripts/install.sh --tag ~/my-tag.wav   # install a tag file as yours
 scripts/uninstall.sh          # stop + remove unit/agent; keeps env, tags and state unless --purge
 ```
 
 Steps:
 
-1. Detect the OS and check the host requirements for the mode.
+It never uses `sudo`; run it as yourself from your desktop session.
+
+1. Detect the OS and check the host requirements for the mode (systemd user session, Docker
+   reachable without root, PulseAudio socket; or cargo).
 2. Ask which accounts to link. Tokens are read from `GITHUB_TOKEN` / `GITLAB_TOKEN`, else offered
-   from `gh auth token` / `glab`, else prompted (hidden input).
+   from `gh auth token` / `glab config get token`, else prompted (hidden input). Other settings
+   exported in the shell (`WATCH`, `GITHUB_REPOS`, `QUIET_HOURS`, …) are copied into the file.
 3. Write `~/.config/producer-tag-on-merge/env` (mode `600`). Kept on re-runs unless
-   `--reconfigure`.
-4. Create the tags dir. If it has no `default.*`, ask for a file (or install the bundled sample
-   tag so it works out of the box).
-5. Build the image (`docker build`) or install the binary to `~/.local/bin` (`cargo build
-   --release`).
-6. Install and start the unit (Linux) or agent (macOS), then run `check` and `play` so you hear
-   the tag once.
+   `--reconfigure`. `TAGS_DIR`/`DATA_DIR` are never written there (the image has its own).
+4. Create the tags dir. If it has no `default.*`, ask for a file, or install the bundled
+   [`assets/sample-tag.wav`](../assets/sample-tag.wav) so it works out of the box.
+5. Build the image (`docker build`) or the binary (`cargo build --release --locked`, installed to
+   `~/.local/bin`).
+6. Run `check` (abort on failure) and `play` so you hear the tag once.
+7. Install and (re)start the unit (Linux) or agent (macOS).
 
 ## Linux
 
-### Docker image (planned)
+### Docker image
 
 Multi-stage build, same shape as the sibling projects:
 
@@ -71,7 +76,11 @@ Multi-stage build, same shape as the sibling projects:
    (`paplay`, `pactl`; libsndfile decodes wav/ogg/flac/mp3). Binary at
    `/usr/local/bin/producer-tag-on-merge`, `ENTRYPOINT ["tini", "--", "producer-tag-on-merge"]`,
    `CMD ["daemon"]`, `ENV DATA_DIR=/data TAGS_DIR=/tags PLAYER=paplay
-   PULSE_SERVER=unix:/run/pulse/native`.
+   PULSE_SERVER=unix:/run/pulse/native HOME=/tmp` (libpulse needs a writable home for any uid).
+   Default user `app` (uid 1000) when run without `--user`.
+
+CI builds it on every push and publishes `linux/amd64` + `linux/arm64` images to Docker Hub on
+releases: [repository-setup.md](repository-setup.md).
 
 The container runs with the **host user's uid/gid** (`--user`), otherwise the PulseAudio socket
 refuses it and the bind-mounted dirs are not writable.
@@ -81,17 +90,21 @@ refuses it and the bind-mounted dirs are not writable.
 ```bash
 docker build -t producer-tag-on-merge .
 
+mkdir -p ~/.config/producer-tag-on-merge/tags ~/.local/share/producer-tag-on-merge
 docker run -d --name producer-tag-on-merge --restart unless-stopped \
   --user "$(id -u):$(id -g)" \
   --env-file ~/.config/producer-tag-on-merge/env \
-  -v "$XDG_RUNTIME_DIR/pulse/native:/run/pulse/native" \
-  -v ~/.config/producer-tag-on-merge/tags:/tags:ro \
-  -v ~/.local/share/producer-tag-on-merge:/data \
+  --mount type=bind,source="$XDG_RUNTIME_DIR/pulse/native",target=/run/pulse/native \
+  --mount type=bind,source="$HOME/.config/producer-tag-on-merge/tags",target=/tags,readonly \
+  --mount type=bind,source="$HOME/.local/share/producer-tag-on-merge",target=/data \
   producer-tag-on-merge
 
 docker exec producer-tag-on-merge producer-tag-on-merge play     # hear it
 docker logs -f producer-tag-on-merge
 ```
+
+`--mount` instead of `-v`: if a source path is missing (e.g. the socket before `pipewire-pulse`
+started), `-v` would create a root-owned directory in its place; `--mount` fails instead.
 
 Classic PulseAudio (not PipeWire) may also need its auth cookie:
 `-v ~/.config/pulse/cookie:/run/pulse/cookie:ro -e PULSE_COOKIE=/run/pulse/cookie`.
@@ -101,26 +114,25 @@ needs `pipewire-pulse`, installed by default on current Ubuntu and Fedora).
 
 ### systemd user unit (docker mode)
 
-`~/.config/systemd/user/producer-tag-on-merge.service`, installed by `scripts/install.sh`
-(`deploy/systemd/docker.service`, planned):
+`~/.config/systemd/user/producer-tag-on-merge.service`, installed by `scripts/install.sh` from
+[`deploy/systemd/docker.service`](../deploy/systemd/docker.service) (`@DOCKER@` becomes
+`command -v docker`, `@IMAGE@` `producer-tag-on-merge:latest`):
 
 ```ini
 [Unit]
 Description=producer-tag-on-merge (Docker)
-Documentation=https://github.com/VillegasMich/producer-tag-on-merge
 After=pipewire-pulse.service pulseaudio.service
 
 [Service]
 Type=simple
 Environment=CONTAINER=producer-tag-on-merge
 Environment=IMAGE=producer-tag-on-merge:latest
-# Remove a container left over from an unclean stop.
 ExecStartPre=-/usr/bin/docker rm --force ${CONTAINER}
 ExecStart=/usr/bin/docker run --rm --name ${CONTAINER} --user %U:%G \
   --env-file %h/.config/producer-tag-on-merge/env \
-  --volume %t/pulse/native:/run/pulse/native \
-  --volume %h/.config/producer-tag-on-merge/tags:/tags:ro \
-  --volume %h/.local/share/producer-tag-on-merge:/data \
+  --mount type=bind,source=%t/pulse/native,target=/run/pulse/native \
+  --mount type=bind,source=%h/.config/producer-tag-on-merge/tags,target=/tags,readonly \
+  --mount type=bind,source=%h/.local/share/producer-tag-on-merge,target=/data \
   ${IMAGE}
 ExecStop=/usr/bin/docker stop --time 20 ${CONTAINER}
 Restart=always
@@ -131,13 +143,14 @@ TimeoutStopSec=30
 WantedBy=default.target
 ```
 
-(`%h` = home, `%t` = `$XDG_RUNTIME_DIR`, `%U`/`%G` = uid/gid. The installer replaces
-`/usr/bin/docker` with `command -v docker`.) A user unit can't order itself after the system
-`docker.service`; if Docker isn't up yet the run fails and `Restart=always` retries.
+(`%h` = home, `%t` = `$XDG_RUNTIME_DIR`, `%U`/`%G` = uid/gid.) A user unit can't order itself
+after the system `docker.service`; if Docker isn't up yet the run fails and `Restart=always`
+retries.
 
 ### systemd user unit (native mode)
 
-`deploy/systemd/native.service` (planned):
+[`deploy/systemd/native.service`](../deploy/systemd/native.service) (`@BIN@` becomes
+`~/.local/bin/producer-tag-on-merge`):
 
 ```ini
 [Unit]
@@ -146,7 +159,7 @@ After=pipewire-pulse.service pulseaudio.service
 
 [Service]
 Type=simple
-ExecStart=%h/.local/bin/producer-tag-on-merge --env-file %h/.config/producer-tag-on-merge/env daemon
+ExecStart=@BIN@ --env-file %h/.config/producer-tag-on-merge/env daemon
 Restart=always
 RestartSec=30
 TimeoutStopSec=30
@@ -171,7 +184,8 @@ tag otherwise. (`loginctl enable-linger` is not needed and not recommended.)
 ### Native LaunchAgent (default)
 
 `~/Library/LaunchAgents/com.villegasmich.producer-tag-on-merge.plist`
-(`deploy/launchd/agent.plist`, planned; the installer fills in the paths):
+([`deploy/launchd/agent.plist`](../deploy/launchd/agent.plist); the installer fills in `@BIN@`,
+`@ENV_FILE@` and `@LOG_FILE@`):
 
 ```xml
 <?xml version="1.0" encoding="UTF-8"?>
@@ -259,3 +273,12 @@ cargo build --release
 git pull
 scripts/install.sh            # rebuilds image/binary and restarts; env, tags and state are kept
 ```
+
+## Uninstalling
+
+```bash
+scripts/uninstall.sh          # stop and remove the unit/agent and container
+scripts/uninstall.sh --purge  # also delete env file (tokens), tags, state, binary and image
+```
+
+Revoke the tokens on GitHub/GitLab too if you don't use them elsewhere.

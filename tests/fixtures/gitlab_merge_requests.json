@@ -1,0 +1,45 @@
+[
+  {
+    "id": 331245,
+    "iid": 57,
+    "project_id": 1001,
+    "title": "Fix flaky pipeline",
+    "description": "Example description",
+    "state": "merged",
+    "created_at": "2026-10-04T09:00:00.000Z",
+    "updated_at": "2026-10-04T11:20:05.512Z",
+    "merged_at": "2026-10-04T11:20:03.120Z",
+    "merge_user": { "id": 10, "username": "maintainer" },
+    "author": { "id": 11, "username": "JDoe", "name": "Jane Doe" },
+    "web_url": "https://gitlab.com/acme/backend/api/-/merge_requests/57",
+    "references": { "short": "!57", "relative": "!57", "full": "acme/backend/api!57" }
+  },
+  {
+    "id": 331246,
+    "iid": 3,
+    "project_id": 1002,
+    "title": "Old instance: no merged_at",
+    "state": "merged",
+    "updated_at": "2026-10-04T11:30:00.000Z",
+    "merged_at": null,
+    "author": { "id": 12, "username": "bob.smith" },
+    "web_url": "https://gitlab.com/acme/frontend/-/merge_requests/3"
+  },
+  {
+    "id": 331200,
+    "iid": 1,
+    "project_id": 1002,
+    "title": "Merged long ago, updated recently",
+    "state": "merged",
+    "updated_at": "2026-10-04T11:40:00.000Z",
+    "merged_at": "2026-09-01T08:00:00.000Z",
+    "author": { "id": 12, "username": "bob.smith" },
+    "web_url": "https://gitlab.com/acme/frontend/-/merge_requests/1"
+  },
+  {
+    "id": 331247,
+    "title": "Missing iid and author",
+    "merged_at": "2026-10-04T11:45:00.000Z",
+    "web_url": "https://gitlab.com/acme/frontend/-/merge_requests/4"
+  }
+]

@@ -40,11 +40,12 @@ The service only **reads** from GitHub/GitLab and only **writes** sound to the l
 - **Synchronous.** No async runtime; bounded `std::thread::sleep` chunks.
 - **UTC internally.** `TIMEZONE` only affects `QUIET_HOURS`.
 
-## Components (planned)
+## Components
 
 ```
 src/
 ├── main.rs          # CLI (clap), --env-file, logging, signal handlers, dispatch to app
+├── lib.rs           # module tree (a library so tests/ can use it)
 ├── app.rs           # wires everything into the commands: daemon, once, status, check, play, tag, simulate
 ├── config.rs        # env var parsing + validation (Secret type for tokens)
 ├── envfile.rs       # minimal KEY=value parser for --env-file (same format as docker --env-file)
@@ -52,14 +53,15 @@ src/
 ├── source/
 │   ├── mod.rs       # trait `MergeSource`, struct `MergeEvent`
 │   ├── github.rs    # GitHubSource: search API
-│   └── gitlab.rs    # GitLabSource: merge_requests API
+│   ├── gitlab.rs    # GitLabSource: merge_requests API
+│   └── fake.rs      # ScriptedSource for tests and `simulate`
 ├── http.rs          # ureq agent: auth headers, ETag cache, rate-limit / Retry-After handling
-├── state.rs         # trait `StateStore`: JSON state file (cursors + seen set)
+├── state.rs         # trait `StateStore`: JSON state file (cursors + seen set), in-memory store
 ├── tags.rs          # tag lookup per author, `tag set` / `tag list` validation
 ├── player.rs        # trait `Player`: CommandPlayer (paplay/pw-play/aplay/afplay/custom), NullPlayer
 ├── hours.rs         # QUIET_HOURS parsing and "is now inside" in TIMEZONE
 ├── poller.rs        # one poll cycle: fetch → dedupe → filter → play; and the daemon loop
-├── retry.rs         # exponential backoff
+├── retry.rs         # exponential backoff for failed polls
 ├── clock.rs         # `Clock` trait: SystemClock (sleep interruptible by SIGTERM), fake for tests
 └── exec.rs          # Command wrapper: timeout, captured output, kill on timeout
 ```
@@ -125,8 +127,10 @@ struct MergeEvent {
 }
 ```
 
-`since = last_successful_poll - OVERLAP` (10 min). The overlap covers search-index lag and clock
-skew; the seen set removes the duplicates it causes.
+`since = last_successful_poll - OVERLAP` (10 min), rounded down to the full hour. The overlap
+covers search-index lag and clock skew; the rounding keeps the request URL identical between polls
+so `ETag`s work (below). The seen set removes the duplicates both cause. On a first start
+`last_successful_poll` is "now".
 
 ### GitHub
 
@@ -134,19 +138,21 @@ One Search API request per poll (`GET {GITHUB_API_URL}/search/issues`):
 
 | Watch mode | Query (`q`)                                                                 |
 | ---------- | --------------------------------------------------------------------------- |
-| `mine`     | `is:pr is:merged author:<login> merged:>=<since ISO 8601>`                  |
-| `repos`    | `is:pr is:merged merged:>=<since> repo:a/b repo:c/d org:acme` (entries OR'd) |
+| `mine`     | `is:pr is:merged merged:>=<since ISO 8601> author:<login>`                  |
+| `repos`    | `is:pr is:merged merged:>=<since> repo:a/b repo:c/d user:acme` (entries OR'd; `user:` matches users and orgs) |
 
 Parameters: `sort=updated&order=desc&per_page=50`. Headers: `Authorization: Bearer <token>`,
 `Accept: application/vnd.github+json`, `X-GitHub-Api-Version: 2022-11-28`, `User-Agent`.
 `merged_at` comes from `item.pull_request.merged_at`; author from `item.user.login`.
 
-Notes to verify while implementing:
+Notes:
 
 - Search is rate-limited to 30 requests/min per user; the default 60 s interval uses 1/min.
   On 403/429 honor `Retry-After` / `x-ratelimit-reset`.
 - Search results can lag a minute or two behind the merge. That's the expected latency of the tag.
-- Long `repos` lists can exceed the query length limit (256 chars): split into several queries.
+- Long `repos` lists can exceed the query length limit (256 chars): split into several queries
+  (one request each per poll).
+- Items that aren't merged PRs or miss fields are skipped, not fatal.
 - If more than 50 results come back (huge catch-up), only the first page is used; the rest is
   older than the catch-up window anyway.
 
@@ -157,15 +163,27 @@ Header `PRIVATE-TOKEN: <token>`, base `{GITLAB_URL}/api/v4`.
 | Watch mode | Request                                                                                      |
 | ---------- | -------------------------------------------------------------------------------------------- |
 | `mine`     | `GET /merge_requests?scope=created_by_me&state=merged&updated_after=<since>&order_by=updated_at&sort=desc&per_page=50` |
-| `repos`    | `GET /projects/<url-encoded path>/merge_requests?state=merged&updated_after=<since>&…` per project, or `GET /groups/<path>/merge_requests?…` for a group (includes subgroups) |
+| `repos`    | `GET /projects/<url-encoded path>/merge_requests?state=merged&updated_after=<since>&…` per project, or `GET /groups/<path>/merge_requests?…` for a group (includes subgroups). Each path is resolved once: `GET /projects/<path>`, else `GET /groups/<path>`; a path that is neither is skipped with a warning. |
 
 `updated_after` is a superset; keep only MRs with `merged_at >= since` (fall back to `updated_at`
-when `merged_at` is null on old instances). Author: `author.username`.
+when `merged_at` is null on old instances). Author: `author.username`. Repo: `references.full`
+(before the `!`), else the path in `web_url`.
 
 ### Conditional requests
 
-`http.rs` stores the `ETag` of each URL and sends `If-None-Match`. A `304` means "nothing new"
-and, on GitHub, does not count against the rate limit.
+`http.rs` stores the `ETag` of each URL (in memory) and sends `If-None-Match`. A `304` means
+"nothing new" and, on GitHub, does not count against the rate limit.
+
+### Errors
+
+| Response                                   | Meaning                                         |
+| ------------------------------------------ | ----------------------------------------------- |
+| `401`, or `403` without rate-limit headers | Token rejected / missing scope                  |
+| `403`/`429` with `Retry-After`             | Rate limited for that many seconds              |
+| `403`/`429` with `x-ratelimit-remaining: 0` (GitHub) or `ratelimit-remaining: 0` (GitLab) | Rate limited until `…-reset` (epoch) |
+| `429` without hints                        | Rate limited, 60 s                              |
+| `404`                                      | Not found or not visible to the token           |
+| other, network, timeout (30 s)             | Transient                                       |
 
 ## State and deduplication
 
@@ -191,9 +209,11 @@ and, on GitHub, does not count against the rate limit.
 
 - **First start of a source** (no entry in `sources`): fetch, add every result to `seen`, play
   nothing, set `last_success = now`.
-- **Normal poll:** for each event not in `seen`, add it to `seen` *before* playing (a crash
-  mid-play must not replay it), then apply the filters below.
-- `seen` entries older than `OVERLAP + CATCH_UP_MINUTES + 1 day` are pruned on every write.
+- **Normal poll:** for each event not in `seen`, add it to `seen`, then write the state *before*
+  playing (a crash mid-play must not replay it), then apply the filters below. If the state
+  can't be written, nothing plays that cycle (logged as "state not saved").
+- `seen` entries (keyed by merge time) older than the catch-up window + `OVERLAP` + 1 day are
+  pruned on every write; anything that old fails the catch-up filter anyway.
 - `last_played` keeps the last 20 plays for `status`.
 - Writes are atomic (write to `state.json.tmp`, `fsync`, rename). A corrupt or missing file is
   treated as a first start (nothing replays).
@@ -202,11 +222,14 @@ and, on GitHub, does not count against the rate limit.
 
 In order; a skipped event stays in `seen` and is only logged:
 
-1. **Catch-up:** `merged_at < now - CATCH_UP_MINUTES` → skip (machine was asleep/off; the moment
-   is gone). `CATCH_UP_MINUTES=0` plays only merges seen within the current poll window.
+1. **Catch-up:** `merged_at < now - max(CATCH_UP_MINUTES, POLL_INTERVAL_SECONDS + OVERLAP)` → skip
+   (machine was asleep/off; the moment is gone). The second term keeps the normal poll window
+   (search lag included) playable, so `CATCH_UP_MINUTES=0` means "no catch-up after sleep" rather
+   than "nothing ever plays".
 2. **Quiet hours:** now inside `QUIET_HOURS` → skip.
 3. **Burst cap:** at most `MAX_PLAYS_PER_POLL` plays per cycle, oldest merge first, with a 1 s gap.
    Extra events are logged as "skipped (burst)".
+4. **Tag:** no file for the author and no `default.*` → skipped with a warning.
 
 ## Producer tags
 
@@ -219,13 +242,16 @@ For an event by `<author>` on `<platform>`, the first existing file wins
 2. `TAGS_DIR/<author>.<ext>` — same author on any platform
 3. `TAGS_DIR/default.<ext>` — your tag; also used for everyone without a tag
 
-`<platform>` is `github` or `gitlab`; `<author>` is lower-cased. File names are validated: no path
-separators, no `..` (an author name from the API must never escape `TAGS_DIR`).
+`<platform>` is `github` or `gitlab`; `<author>` is lower-cased. Names are validated before they
+become a path: only ASCII letters, digits, `-`, `_`, `.`, `[`, `]` (bots: `dependabot[bot]`), no
+leading dot, so no separators or `..` (an author name from the API must never escape `TAGS_DIR`).
+An author whose name fails validation gets the default tag.
 
 ### `tag set`
 
 Accepts `wav`, `ogg`, `flac`, `mp3`, `aiff`, `m4a` up to 5 MB, copies it to the lookup path
 (replacing any file for the same author with another extension), and plays it once as a preview.
+`--for` takes `github:<user>`, `gitlab:<user>` or `<user>` (any platform).
 How to make a good tag: [tags.md](tags.md).
 
 ## Playing sound
@@ -239,12 +265,14 @@ player is killed after it).
 | `paplay`  | `paplay --volume=<0..65536> <file>`       | PulseAudio or PipeWire-pulse. Used in the Docker image. |
 | `pw-play` | `pw-play --volume=<0.0..1.0> <file>`      | Native PipeWire.                                  |
 | `aplay`   | `aplay -q <file>`                         | Raw ALSA, WAV only, no volume control. Last resort. |
-| `afplay`  | `afplay -v <volume> <file>`               | Built into macOS. Confirm the `-v` scale with `afplay -h`. |
-| `command` | `PLAYER_COMMAND` with `{file}` and `{volume}` (0–100) substituted, split into argv without a shell | Escape hatch. |
+| `afplay`  | `afplay -v <0.00..1.00> <file>`           | Built into macOS; `1` = unchanged level.          |
+| `command` | `PLAYER_COMMAND` with `{file}` and `{volume}` (0–100) substituted, split into argv without a shell | Escape hatch. Must contain `{file}`. |
 | `none`    | nothing, logs "would play …"              | Headless testing.                                 |
 
 On failure (non-zero exit, timeout, audio server gone) the play is retried once after 5 s, then
 dropped with a warning. A merge sound that arrives minutes late is worse than none.
+
+Players run with stdin closed and without `GITHUB_TOKEN`/`GITLAB_TOKEN` in their environment.
 
 ## Daemon loop
 
@@ -253,9 +281,11 @@ dropped with a warning. A merge sound that arrives minutes late is worse than no
 3. Play what passed the filters.
 4. Save state; sleep `POLL_INTERVAL_SECONDS`.
 
-Sleeps are chunks of ≤ 1 s for signal latency and re-check the wall clock: a jump bigger than
-`2 × POLL_INTERVAL_SECONDS` means the machine slept; poll immediately (the catch-up filter decides
-what still plays). Failed polls back off 1, 2, 4… up to 10 min, or until the rate-limit reset.
+Each source has its own schedule. Sleeps are chunks of ≤ 1 s (signal latency) towards a
+wall-clock deadline: the wall clock keeps running while the machine is suspended, so after a
+resume the deadline has passed and the next poll happens immediately (the catch-up filter decides
+what still plays). Failed polls back off 1, 2, 4, 8, 10 min (never sooner than the poll
+interval); rate-limited ones wait until the reset; a rejected token pauses the source for 10 min.
 
 **Shutdown:** first `SIGTERM`/`SIGINT` sets a flag checked by every sleep; a running player is
 allowed to finish (≤ `PLAY_TIMEOUT_SECONDS`), state is saved, exit 0. A second signal exits
@@ -277,9 +307,11 @@ immediately.
 
 ## Logging
 
-Structured logs to stdout (`tracing`), level via `RUST_LOG`. Each poll logs per source: request
-outcome (200/304/error), new events, played/skipped with reason. Plays log repo, number, author,
-tag file. Tokens and API bodies are never logged.
+Structured logs to stdout (`tracing`), level via `RUST_LOG`. At `info`: startup checks, new
+merges, plays (repo, number, author, tag file) and skips with their reason, failures. At `debug`:
+every request with its status (200/304/…) and per-poll counts, so an idle service stays quiet.
+Tokens and API bodies are never logged. `status`, `check` and `tag list` default to `warn` since
+they print a report.
 
 ## Platform support
 

@@ -2,5 +2,29 @@
 name = "producer-tag-on-merge"
 version = "0.1.0"
 edition = "2024"
+description = "Plays your producer tag every time one of your GitHub PRs or GitLab MRs is merged"
+repository = "https://github.com/VillegasMich/producer-tag-on-merge"
+publish = false
 
 [dependencies]
+anyhow = "1.0.104"
+chrono = { version = "0.4.45", default-features = false, features = ["clock", "std", "serde"] }
+chrono-tz = "0.10.4"
+clap = { version = "4.6.7", features = ["derive"] }
+dirs = "7.0.0"
+percent-encoding = "2.3.1"
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.145"
+signal-hook = { version = "0.4.4", default-features = false }
+thiserror = "2.0.21"
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
+ureq = { version = "3.4.2", default-features = false, features = ["rustls"] }
+
+[dev-dependencies]
+tempfile = "3.27.0"
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true

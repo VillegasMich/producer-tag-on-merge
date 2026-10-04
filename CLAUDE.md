@@ -32,7 +32,7 @@ docker build -t producer-tag-on-merge .
 cargo run -- simulate          # fake merge through the real pipeline; plays your tag, no token
 cargo run -- --env-file .env check          # config, tokens, tags, audio
 cargo run -- --env-file .env once --dry-run # real API calls, plays nothing, state untouched
-scripts/install.sh [docker|native]          # install as user service (planned)
+scripts/install.sh [docker|native]          # install as user service (no sudo)
 ```
 
 ## Hard rules
@@ -85,6 +85,10 @@ scripts/install.sh [docker|native]          # install as user service (planned)
   `tests/fixtures/`, scrubbed of personal data), config and env-file parsing, player argv/volume.
 - Service files live in `deploy/` (`deploy/systemd/*.service`, `deploy/launchd/agent.plist`) with
   placeholders the install script fills in.
+- Crate layout: `src/lib.rs` holds the modules (so `tests/` can use them), `src/main.rs` is only
+  the CLI. Integration tests: `tests/cli.rs` (offline binary runs), `tests/e2e.rs` (gated live).
+- CI/release setup (secrets, Docker Hub, rulesets) is documented in `docs/repository-setup.md`;
+  keep it in sync with `.github/workflows/`.
 - Commit messages: Conventional Commits, validated against commitlint
   `@commitlint/config-conventional`.
 

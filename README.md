@@ -58,12 +58,13 @@ tail -f ~/Library/Logs/producer-tag-on-merge.log
 
 ```bash
 docker build -t producer-tag-on-merge .
+mkdir -p ~/.config/producer-tag-on-merge/tags ~/.local/share/producer-tag-on-merge
 docker run -d --name producer-tag-on-merge --restart unless-stopped \
   --user "$(id -u):$(id -g)" \
   --env-file ~/.config/producer-tag-on-merge/env \
-  -v "$XDG_RUNTIME_DIR/pulse/native:/run/pulse/native" \
-  -v ~/.config/producer-tag-on-merge/tags:/tags:ro \
-  -v ~/.local/share/producer-tag-on-merge:/data \
+  --mount type=bind,source="$XDG_RUNTIME_DIR/pulse/native",target=/run/pulse/native \
+  --mount type=bind,source="$HOME/.config/producer-tag-on-merge/tags",target=/tags,readonly \
+  --mount type=bind,source="$HOME/.local/share/producer-tag-on-merge",target=/data \
   producer-tag-on-merge
 ```
 
@@ -101,9 +102,11 @@ required.
 | `POLL_INTERVAL_SECONDS` | `60`                     | How often to check, 15–3600.                             |
 | `CATCH_UP_MINUTES`      | `30`                     | After sleep/offline, merges older than this stay silent. |
 | `MAX_PLAYS_PER_POLL`    | `3`                      | Burst cap when many PRs merge at once.                   |
-| `TAGS_DIR`              | `<DATA_DIR>/tags`        | Tag files (`default.wav`, `github/<user>.wav`…).         |
+| `TAGS_DIR`              | `~/.config/producer-tag-on-merge/tags` | Tag files (`default.wav`, `github/<user>.wav`…); `/tags` in Docker. |
 | `PLAYER`                | `auto`                   | `auto`, `paplay`, `pw-play`, `aplay`, `afplay`, `command`, `none`. |
+| `PLAYER_COMMAND`        | unset                    | `PLAYER=command`: argv with `{file}`/`{volume}`, no shell. |
 | `VOLUME`                | `100`                    | 0–100.                                                   |
+| `PLAY_TIMEOUT_SECONDS`  | `15`                     | Kill the player after this.                              |
 | `QUIET_HOURS`           | unset                    | No sound in this range, e.g. `22:00-08:00`.              |
 | `TIMEZONE`              | `UTC`                    | IANA zone for `QUIET_HOURS`, e.g. `America/Bogota`.      |
 | `DATA_DIR`              | platform dependent       | State file location (`/data` in Docker).                 |
@@ -118,6 +121,7 @@ Full details: [`docs/configuration.md`](docs/configuration.md).
 - [`docs/deployment.md`](docs/deployment.md) – Docker image, systemd user unit, macOS LaunchAgent, tokens
 - [`docs/tags.md`](docs/tags.md) – making a good producer tag, file layout, team tags
 - [`docs/testing.md`](docs/testing.md) – unit tests, `simulate`, manual end-to-end
+- [`docs/repository-setup.md`](docs/repository-setup.md) – CI, Docker Hub secrets, releases
 - [`CLAUDE.md`](CLAUDE.md) – guidance for AI coding assistants working in this repo
 
 ## Development
@@ -132,5 +136,5 @@ cargo run -- simulate          # hear your tag through the full pipeline, no tok
 
 ## Status
 
-Design stage: the documents above describe the planned behavior; the code is being written
-against them.
+Implemented: daemon, all commands, GitHub + GitLab sources, Docker image, systemd/launchd
+install scripts, CI. Pre-1.0: settings may still change between minor versions.

@@ -3,7 +3,8 @@
 All settings come from environment variables. They can also be loaded from a file with
 `producer-tag-on-merge --env-file <path>` (format: `KEY=value`, one per line, `#` comments, no
 quotes, no spaces around `=`; the same file works with `docker run --env-file`). Variables already
-set in the environment win over the file. Invalid values abort startup with a clear error.
+set (non-empty) in the environment win over the file. Invalid values abort startup with a clear
+error; error messages never echo token values or env file lines.
 
 At least one of `GITHUB_TOKEN` / `GITLAB_TOKEN` is required.
 
@@ -62,7 +63,8 @@ How often to ask the APIs for new merges. `15`–`3600`. Lower means faster tags
 ### `CATCH_UP_MINUTES` (default: `30`)
 
 After the machine was asleep, off, or offline, merges older than this are skipped silently.
-`0` = only merges found in the normal poll window play. On the very first start nothing plays.
+`0`–`10080`. The normal poll window (`POLL_INTERVAL_SECONDS` + 10 min overlap for API lag) always
+plays, so `0` means "no catch-up after sleep". On the very first start nothing plays.
 
 ### `MAX_PLAYS_PER_POLL` (default: `3`)
 
@@ -70,10 +72,11 @@ Upper bound of tags played in one cycle (e.g. a release that merges 20 PRs at on
 
 ## Sound
 
-### `TAGS_DIR` (default: `<DATA_DIR>/tags`; Docker image: `/tags`)
+### `TAGS_DIR` (default: `~/.config/producer-tag-on-merge/tags`; Docker image: `/tags`)
 
 Folder with the tag files. Must contain `default.<ext>` (your tag). Layout and lookup order:
-[tags.md](tags.md#where-tags-live).
+[tags.md](tags.md#where-tags-live). The native default is the same path on Linux and macOS, next
+to the env file; don't put `TAGS_DIR` in an env file used with Docker (the image mounts `/tags`).
 
 ### `PLAYER` (default: `auto`)
 
@@ -84,7 +87,8 @@ See [architecture.md](architecture.md#playing-sound).
 ### `PLAYER_COMMAND` (default: unset)
 
 Only with `PLAYER=command`. Program and arguments with `{file}` and `{volume}` (0–100)
-placeholders; split on whitespace, no shell. Example: `ffplay -nodisp -autoexit -loglevel quiet {file}`.
+placeholders; split on whitespace, no shell, so a path with spaces can't be part of the program.
+Must contain `{file}`. Example: `ffplay -nodisp -autoexit -loglevel quiet {file}`.
 
 ### `VOLUME` (default: `100`)
 
@@ -92,7 +96,7 @@ placeholders; split on whitespace, no shell. Example: `ffplay -nodisp -autoexit 
 
 ### `PLAY_TIMEOUT_SECONDS` (default: `15`)
 
-The player is killed after this. Keeps a very long file from blocking the loop.
+`1`–`300`. The player is killed after this. Keeps a very long file from blocking the loop.
 
 ### `QUIET_HOURS` (default: unset)
 
@@ -132,13 +136,13 @@ Where `state.json` lives (and `tags/` unless `TAGS_DIR` is set).
 | `GITLAB_PROJECTS`       | unset                       | `WATCH=repos`: project or group paths, comma list.  |
 | `WATCH`                 | `mine`                      | `mine` or `repos`.                                  |
 | `POLL_INTERVAL_SECONDS` | `60`                        | Poll period, 15–3600.                               |
-| `CATCH_UP_MINUTES`      | `30`                        | Max age of a merge that still plays after sleep.    |
+| `CATCH_UP_MINUTES`      | `30`                        | Max age of a merge that still plays after sleep, 0–10080. |
 | `MAX_PLAYS_PER_POLL`    | `3`                         | Burst cap per cycle.                                |
-| `TAGS_DIR`              | `<DATA_DIR>/tags`           | Tag files.                                          |
+| `TAGS_DIR`              | `~/.config/producer-tag-on-merge/tags` | Tag files (`/tags` in Docker).           |
 | `PLAYER`                | `auto`                      | Audio player backend.                               |
 | `PLAYER_COMMAND`        | unset                       | Custom player for `PLAYER=command`.                 |
 | `VOLUME`                | `100`                       | 0–100.                                              |
-| `PLAY_TIMEOUT_SECONDS`  | `15`                        | Kill the player after this.                         |
+| `PLAY_TIMEOUT_SECONDS`  | `15`                        | Kill the player after this, 1–300.                  |
 | `QUIET_HOURS`           | unset                       | No sound in this range.                             |
 | `TIMEZONE`              | `UTC`                       | Zone for `QUIET_HOURS`.                             |
 | `DATA_DIR`              | platform dependent          | State directory.                                    |

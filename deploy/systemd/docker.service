@@ -1,0 +1,31 @@
+# systemd *user* unit: runs producer-tag-on-merge as a Docker container in your session, where
+# the audio server lives. Installed by scripts/install.sh to
+# ~/.config/systemd/user/producer-tag-on-merge.service, which replaces @DOCKER@ and @IMAGE@.
+#
+# %h = home, %t = $XDG_RUNTIME_DIR, %U/%G = your uid/gid. `--mount` (unlike `-v`) fails instead
+# of creating a root-owned directory when a source path doesn't exist yet, e.g. the PulseAudio
+# socket before pipewire-pulse has started; Restart= then retries.
+[Unit]
+Description=producer-tag-on-merge (Docker)
+Documentation=https://github.com/VillegasMich/producer-tag-on-merge
+After=pipewire-pulse.service pulseaudio.service
+
+[Service]
+Type=simple
+Environment=CONTAINER=producer-tag-on-merge
+Environment=IMAGE=@IMAGE@
+# Remove a container left over from an unclean stop.
+ExecStartPre=-@DOCKER@ rm --force ${CONTAINER}
+ExecStart=@DOCKER@ run --rm --name ${CONTAINER} --user %U:%G \
+  --env-file %h/.config/producer-tag-on-merge/env \
+  --mount type=bind,source=%t/pulse/native,target=/run/pulse/native \
+  --mount type=bind,source=%h/.config/producer-tag-on-merge/tags,target=/tags,readonly \
+  --mount type=bind,source=%h/.local/share/producer-tag-on-merge,target=/data \
+  ${IMAGE}
+ExecStop=@DOCKER@ stop --time 20 ${CONTAINER}
+Restart=always
+RestartSec=30
+TimeoutStopSec=30
+
+[Install]
+WantedBy=default.target

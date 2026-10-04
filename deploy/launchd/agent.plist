@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  macOS LaunchAgent (runs in your login session, where CoreAudio is). Installed by
+  scripts/install.sh to ~/Library/LaunchAgents/com.villegasmich.producer-tag-on-merge.plist,
+  which replaces @BIN@, @ENV_FILE@ and @LOG_FILE@. Tokens stay in the env file, never here.
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.villegasmich.producer-tag-on-merge</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>@BIN@</string>
+    <string>--env-file</string>
+    <string>@ENV_FILE@</string>
+    <string>daemon</string>
+  </array>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>ThrottleInterval</key>
+  <integer>30</integer>
+  <key>ProcessType</key>
+  <string>Background</string>
+  <key>StandardOutPath</key>
+  <string>@LOG_FILE@</string>
+  <key>StandardErrorPath</key>
+  <string>@LOG_FILE@</string>
+</dict>
+</plist>
