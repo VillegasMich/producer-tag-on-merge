@@ -111,6 +111,7 @@ required.
 | `TIMEZONE`              | `UTC`                    | IANA zone for `QUIET_HOURS`, e.g. `America/Bogota`.      |
 | `DATA_DIR`              | platform dependent       | State file location (`/data` in Docker).                 |
 | `RUST_LOG`              | `info`                   | Log level.                                               |
+| `IMAGE`                 | `producer-tag-on-merge:latest` | Linux docker mode: image to run, e.g. `<user>/producer-tag-on-merge:1.2.3` (published release). |
 
 Full details: [`docs/configuration.md`](docs/configuration.md).
 

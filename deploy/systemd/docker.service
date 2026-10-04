@@ -1,6 +1,9 @@
 # systemd *user* unit: runs producer-tag-on-merge as a Docker container in your session, where
 # the audio server lives. Installed by scripts/install.sh to
-# ~/.config/systemd/user/producer-tag-on-merge.service, which replaces @DOCKER@ and @IMAGE@.
+# ~/.config/systemd/user/producer-tag-on-merge.service, which replaces @DOCKER@ and @IMAGE@
+# (IMAGE from the env file, e.g. <user>/producer-tag-on-merge:1.2.3, else the locally built
+# producer-tag-on-merge:latest). The unit doesn't read the env file itself: that would load the
+# tokens into its environment. Change IMAGE by re-running the install script.
 #
 # %h = home, %t = $XDG_RUNTIME_DIR, %U/%G = your uid/gid. `--mount` (unlike `-v`) fails instead
 # of creating a root-owned directory when a source path doesn't exist yet, e.g. the PulseAudio

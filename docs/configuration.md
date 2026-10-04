@@ -124,6 +124,16 @@ Where `state.json` lives (and `tags/` unless `TAGS_DIR` is set).
 `error`, `warn`, `info`, `debug`, `trace`, or a `tracing` filter like
 `producer_tag_on_merge=debug`.
 
+## Deployment (Linux, docker mode)
+
+### `IMAGE` (default: `producer-tag-on-merge:latest`, built locally)
+
+Docker image the systemd user unit runs. Read by [`scripts/install.sh`](../scripts/install.sh),
+not by the service itself. Unset (or the default): the installer builds the image from your
+checkout. Set to a published image, e.g. `<user>/producer-tag-on-merge:1.2.3`: the installer pulls
+it instead and writes it into the unit. Pin a version rather than `latest` so an upgrade is an
+explicit edit. Ignored in native mode. See [deployment.md](deployment.md#upgrading).
+
 ## Reference
 
 | Variable                | Default                     | Description                                         |
@@ -147,3 +157,4 @@ Where `state.json` lives (and `tags/` unless `TAGS_DIR` is set).
 | `TIMEZONE`              | `UTC`                       | Zone for `QUIET_HOURS`.                             |
 | `DATA_DIR`              | platform dependent          | State directory.                                    |
 | `RUST_LOG`              | `info`                      | Log level.                                          |
+| `IMAGE`                 | `producer-tag-on-merge:latest` | Linux docker mode: image to run (install script). |

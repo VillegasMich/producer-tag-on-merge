@@ -3,7 +3,9 @@
 #
 #   scripts/install.sh [docker|native] [--reconfigure] [--tag FILE]
 #
-#   docker         (Linux default) build the Docker image and run it from a systemd user unit.
+#   docker         (Linux default) build the Docker image, or pull IMAGE if it is set (exported,
+#                  or in the env file) to a published one such as
+#                  <user>/producer-tag-on-merge:1.2.3, and run it from a systemd user unit.
 #                  Needs docker (your user in the docker group, or rootless Docker), systemd and
 #                  PulseAudio or PipeWire-pulse.
 #   native         (macOS default) build the binary with cargo, install it to ~/.local/bin and
@@ -15,11 +17,12 @@
 # (after asking), else a hidden prompt; they only travel through variables and files, never argv.
 # Settings exported when running this script (WATCH, GITHUB_REPOS, GITLAB_URL, QUIET_HOURS, ...)
 # are written to the env file too. Re-running it updates the image/binary and restarts the service;
-# the env file, tags and state are kept.
+# the env file, tags and state are kept, except that an exported IMAGE replaces the one in the file.
+# Upgrade to a published release: set IMAGE in the env file (or export it) and re-run.
 set -euo pipefail
 
 readonly APP=producer-tag-on-merge
-readonly IMAGE=$APP:latest
+readonly LOCAL_IMAGE=$APP:latest
 readonly LABEL=com.villegasmich.$APP
 readonly CONFIG_DIR=$HOME/.config/$APP
 readonly ENV_FILE=$CONFIG_DIR/env
@@ -31,7 +34,7 @@ readonly MAX_TAG_BYTES=$((5 * 1024 * 1024))
 # Written to the env file when exported. Not TAGS_DIR/DATA_DIR: the Docker image sets its own.
 readonly SETTINGS=(GITHUB_API_URL GITHUB_REPOS GITLAB_URL GITLAB_PROJECTS WATCH
   POLL_INTERVAL_SECONDS CATCH_UP_MINUTES MAX_PLAYS_PER_POLL PLAYER PLAYER_COMMAND VOLUME
-  PLAY_TIMEOUT_SECONDS QUIET_HOURS TIMEZONE RUST_LOG)
+  PLAY_TIMEOUT_SECONDS QUIET_HOURS TIMEZONE RUST_LOG IMAGE)
 
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 readonly ROOT
@@ -47,6 +50,11 @@ confirm() {
   local answer
   read -r -p "$1 [Y/n] " answer
   [[ -z $answer || $answer =~ ^[Yy] ]]
+}
+# Docker image reference: [registry/]repo[:tag][@digest]. Also keeps it safe to put in the unit.
+check_image() {
+  [[ $1 =~ ^[A-Za-z0-9][A-Za-z0-9._/:@-]*$ ]] \
+    || die "IMAGE '$1' is not a Docker image name (e.g. <user>/$APP:1.2.3)"
 }
 
 # --- Arguments -------------------------------------------------------------------------------
@@ -67,7 +75,7 @@ while (($#)); do
       tag_file=$2
       shift
       ;;
-    -h | --help) sed -n '2,19p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h | --help) sed -n '2,21p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) die "unknown argument '$1' (try --help)" ;;
   esac
   shift
@@ -76,6 +84,7 @@ done
 if [[ $os == Darwin && $mode == docker ]]; then
   die "Docker on macOS can't reach CoreAudio and isn't automated; use native, or see docs/deployment.md#docker-on-macos-experimental"
 fi
+[[ -z ${IMAGE:-} ]] || check_image "$IMAGE"
 
 # --- Requirements ----------------------------------------------------------------------------
 if [[ $os == Linux ]]; then
@@ -179,9 +188,26 @@ elif [[ $has_default == false ]]; then
 fi
 
 # --- Build -----------------------------------------------------------------------------------
+# Same precedence as for the other settings: exported IMAGE, then the env file, then the image
+# built from this checkout.
+image=${IMAGE:-$(sed -n 's/^IMAGE=//p' "$ENV_FILE" | tail -n 1)}
 if [[ $mode == docker ]]; then
-  log "Building Docker image $IMAGE"
-  docker build --tag "$IMAGE" "$ROOT"
+  image=${image:-$LOCAL_IMAGE}
+  check_image "$image"
+  if [[ $image == "$LOCAL_IMAGE" ]]; then
+    log "Building Docker image $image"
+    docker build --tag "$image" "$ROOT"
+  else
+    log "Pulling Docker image $image"
+    docker pull "$image" || die "cannot pull '$image'; check IMAGE (the service was not changed)"
+  fi
+  # Only once the pull worked, so a wrong tag doesn't end up in a kept env file.
+  if [[ -n ${IMAGE:-} ]] && ! grep -qxF "IMAGE=$IMAGE" "$ENV_FILE"; then
+    log "Setting IMAGE=$IMAGE in $ENV_FILE"
+    tmp=$(umask 077 && mktemp "$CONFIG_DIR/env.XXXXXX")
+    { grep -v '^IMAGE=' "$ENV_FILE" || true; printf 'IMAGE=%s\n' "$IMAGE"; } >"$tmp"
+    mv "$tmp" "$ENV_FILE"
+  fi
   data_dir=$HOME/.local/share/$APP
   mkdir -p "$data_dir"
   run_app() {
@@ -189,9 +215,10 @@ if [[ $mode == docker ]]; then
       --mount "type=bind,source=$pulse_socket,target=/run/pulse/native" \
       --mount "type=bind,source=$TAGS_DIR,target=/tags,readonly" \
       --mount "type=bind,source=$data_dir,target=/data" \
-      "$IMAGE" "$@"
+      "$image" "$@"
   }
 else
+  [[ -z $image ]] || warn "IMAGE ($image) only applies to docker mode; building the binary instead"
   log "Building the release binary"
   (cd "$ROOT" && cargo build --release --locked)
   mkdir -p "$BIN_DIR"
@@ -217,7 +244,7 @@ if [[ $os == Linux ]]; then
   mkdir -p "$unit_dir"
   log "Installing $unit ($mode mode)"
   sed -e "s|@DOCKER@|$(command -v docker || echo /usr/bin/docker)|g" \
-    -e "s|@IMAGE@|$IMAGE|g" -e "s|@BIN@|$BIN|g" \
+    -e "s|@IMAGE@|${image:-$LOCAL_IMAGE}|g" -e "s|@BIN@|$BIN|g" \
     "$ROOT/deploy/systemd/$mode.service" >"$unit"
   systemctl --user daemon-reload
   systemctl --user enable "$APP" >/dev/null 2>&1
@@ -225,6 +252,7 @@ if [[ $os == Linux ]]; then
   log "Done. $APP runs whenever you're logged in."
   echo "    Status:  systemctl --user status $APP"
   echo "    Logs:    journalctl --user -u $APP -f"
+  if [[ $mode == docker ]]; then echo "    Image:   $image"; fi
 else
   plist=$HOME/Library/LaunchAgents/$LABEL.plist
   log_file=$HOME/Library/Logs/$APP.log

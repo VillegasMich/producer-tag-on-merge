@@ -54,13 +54,15 @@ It never uses `sudo`; run it as yourself from your desktop session.
    reachable without root, PulseAudio socket; or cargo).
 2. Ask which accounts to link. Tokens are read from `GITHUB_TOKEN` / `GITLAB_TOKEN`, else offered
    from `gh auth token` / `glab config get token`, else prompted (hidden input). Other settings
-   exported in the shell (`WATCH`, `GITHUB_REPOS`, `QUIET_HOURS`, …) are copied into the file.
+   exported in the shell (`WATCH`, `GITHUB_REPOS`, `QUIET_HOURS`, `IMAGE`, …) are copied into
+   the file.
 3. Write `~/.config/producer-tag-on-merge/env` (mode `600`). Kept on re-runs unless
    `--reconfigure`. `TAGS_DIR`/`DATA_DIR` are never written there (the image has its own).
 4. Create the tags dir. If it has no `default.*`, ask for a file, or install the bundled
    [`assets/sample-tag.wav`](../assets/sample-tag.wav) so it works out of the box.
-5. Build the image (`docker build`) or the binary (`cargo build --release --locked`, installed to
-   `~/.local/bin`).
+5. Build the image (`docker build`), or pull [`IMAGE`](configuration.md#image-default-producer-tag-on-mergelatest-built-locally)
+   if it is set to a published image, or build the binary (`cargo build --release --locked`,
+   installed to `~/.local/bin`).
 6. Run `check` (abort on failure) and `play` so you hear the tag once.
 7. Install and (re)start the unit (Linux) or agent (macOS).
 
@@ -80,7 +82,8 @@ Multi-stage build, same shape as the sibling projects:
    Default user `app` (uid 1000) when run without `--user`.
 
 CI builds it on every push and publishes `linux/amd64` + `linux/arm64` images to Docker Hub on
-releases: [repository-setup.md](repository-setup.md).
+releases: [repository-setup.md](repository-setup.md). To run a published image instead of
+building one, see [Upgrading](#upgrading).
 
 The container runs with the **host user's uid/gid** (`--user`), otherwise the PulseAudio socket
 refuses it and the bind-mounted dirs are not writable.
@@ -116,7 +119,9 @@ needs `pipewire-pulse`, installed by default on current Ubuntu and Fedora).
 
 `~/.config/systemd/user/producer-tag-on-merge.service`, installed by `scripts/install.sh` from
 [`deploy/systemd/docker.service`](../deploy/systemd/docker.service) (`@DOCKER@` becomes
-`command -v docker`, `@IMAGE@` `producer-tag-on-merge:latest`):
+`command -v docker`, `@IMAGE@` the env file's `IMAGE`, default `producer-tag-on-merge:latest`).
+The unit doesn't read the env file itself (that would load the tokens into the unit's
+environment), so changing `IMAGE` takes a re-run of the install script:
 
 ```ini
 [Unit]
@@ -274,11 +279,29 @@ git pull
 scripts/install.sh            # rebuilds image/binary and restarts; env, tags and state are kept
 ```
 
+### Upgrading
+
+Linux docker mode can run a [published release](repository-setup.md#releasing) instead of an
+image built from your checkout: set `IMAGE` and re-run the installer.
+
+```bash
+$EDITOR ~/.config/producer-tag-on-merge/env     # IMAGE=<user>/producer-tag-on-merge:1.3.0
+scripts/install.sh                              # pulls it, runs check + play, restarts the unit
+# or, without editing the file (the exported value is saved to it once the pull works):
+IMAGE=<user>/producer-tag-on-merge:1.3.0 scripts/install.sh
+```
+
+The pull and the `check` run before the restart, so a typo or a missing tag fails the script and
+leaves the running version alone. State lives on the host (`~/.local/share/producer-tag-on-merge`),
+so an upgrade never replays a merge. To roll back, set the previous tag and re-run. Removing
+`IMAGE` (or `--reconfigure` without exporting it) goes back to the locally built image. A
+plain `systemctl --user restart` keeps the image the unit was installed with.
+
 ## Uninstalling
 
 ```bash
 scripts/uninstall.sh          # stop and remove the unit/agent and container
-scripts/uninstall.sh --purge  # also delete env file (tokens), tags, state, binary and image
+scripts/uninstall.sh --purge  # also delete env file (tokens), tags, state, binary and images
 ```
 
 Revoke the tokens on GitHub/GitLab too if you don't use them elsewhere.
